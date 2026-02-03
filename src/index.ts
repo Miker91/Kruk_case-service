@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import routes from './routes';
+import { rabbitmq } from './config/rabbitmq';
+import { paymentEventConsumer } from './events';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -44,10 +46,21 @@ app.use((req, res) => {
   });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🏢 Case Service running on port ${PORT}`);
   console.log(`   Health: http://localhost:${PORT}/health`);
   console.log(`   API:    http://localhost:${PORT}/api/cases`);
+
+  // Initialize RabbitMQ connection and start consuming events
+  try {
+    await rabbitmq.connect();
+    await paymentEventConsumer.setup();
+    await paymentEventConsumer.startConsuming();
+    console.log(`   Events: Listening for payment.completed`);
+  } catch (error) {
+    console.warn('   Events: RabbitMQ not available, running in REST-only mode');
+    console.warn('           Set RABBITMQ_URL to enable event processing');
+  }
 });
 
 export default app;

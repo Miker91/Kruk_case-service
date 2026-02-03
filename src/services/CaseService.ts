@@ -21,6 +21,9 @@ import {
 const cases: Map<string, Case> = new Map();
 const caseHistory: Map<string, CaseHistoryEntry[]> = new Map();
 
+// Idempotency tracking for payment events (KRUK-10)
+const processedPayments: Set<string> = new Set();
+
 // Initialize sample data
 function initializeSampleData(): void {
   const sampleCases: Case[] = [
@@ -288,6 +291,7 @@ export class CaseService {
 
   /**
    * Record payment against case
+   * Idempotent - duplicate paymentIds are ignored (KRUK-10)
    */
   async recordPayment(
     caseId: string,
@@ -297,6 +301,13 @@ export class CaseService {
     const caseData = cases.get(caseId);
     if (!caseData) {
       return null;
+    }
+
+    // Idempotency check - prevent duplicate processing (KRUK-10)
+    const idempotencyKey = `${caseId}:${paymentId}`;
+    if (processedPayments.has(idempotencyKey)) {
+      console.log(`[CaseService] Duplicate payment ignored: ${paymentId} for case ${caseId}`);
+      return caseData; // Return current state without modification
     }
 
     caseData.paidAmount += amount;
@@ -327,6 +338,15 @@ export class CaseService {
         'Case reopened due to payment received after write-off',
         'system'
       );
+    }
+
+    // Mark payment as processed (KRUK-10 idempotency)
+    processedPayments.add(idempotencyKey);
+
+    // Cleanup old entries to prevent memory leak (keep last 10000)
+    if (processedPayments.size > 10000) {
+      const oldestKeys = Array.from(processedPayments).slice(0, 5000);
+      oldestKeys.forEach((key) => processedPayments.delete(key));
     }
 
     cases.set(caseId, caseData);
